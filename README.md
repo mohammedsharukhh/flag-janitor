@@ -20,7 +20,8 @@ flowchart LR
   G -->|no| I["flag archived<br/>in Flagsmith"]
 ```
 
-Built for the self-hosted Flagsmith track: everything talks to your own Flagsmith instance.
+**Toggle Wars, Track 03 (Build on Open Source Flagsmith):** an integration and developer tool for **self-hosted Flagsmith**.
+Everything talks to your own Flagsmith instance (Docker Compose included), and it plugs into any repo as a GitHub Action.
 See it working: [demo-shop pull requests](https://github.com/mohammedsharukhh/flag-janitor-demo-shop/pulls) opened by the janitor.
 
 ## Try it in 5 minutes
