@@ -142,9 +142,31 @@ Flag Janitor runs inside your CI with an admin key, so it is built to fail safe.
 ## Tests
 
 ```bash
-npm test            # 42 tests: codemod, repo safety, Flagsmith client, webhook receiver, CLI end-to-end (real git + fake Flagsmith + fake gh)
+npm test            # 56 tests: codemod, repo safety, Flagsmith client, webhook receiver, CLI end-to-end (real git + fake Flagsmith + fake gh), Agent Skill
 npm run test:live   # read-only checks against your self-hosted Flagsmith (uses .env)
 ```
+
+## Agent Skill: `flagsmith-flag-debt`
+
+The same job, done by a coding agent with the **Flagsmith CLI**:
+[`skills/flagsmith-flag-debt`](skills/flagsmith-flag-debt/SKILL.md) ([agentskills.io](https://agentskills.io/specification) format).
+Copy the folder into your agent's skills directory and ask it to *"clean up stale Flagsmith flags"*.
+
+| Step | How |
+|---|---|
+| Find | [`scripts/find-stale.mjs`](skills/flagsmith-flag-debt/scripts/find-stale.mjs): `flagsmith api` (stale tag, paginated features), `flagsmith feature list` (drops archived), `flagsmith flag list` (production value, override counts). Read-only. One line per flag: `old_search on`, `beta skip segment overrides` |
+| Rewrite | `flag-janitor rewrite <flag> on\|off`: the AST codemod, offline, pinned to a commit. Lists leftovers (config, mocks, `getValue`) for the agent to fix by hand |
+| Ship | tests must pass, one PR per flag, skipped if any PR for that flag exists. **Asks before pushing** |
+| Archive | only after merge, when no file mentions the flag and Flagsmith still has the same value: `flagsmith feature update <flag> --archive`. **Asks first.** Never deletes |
+
+Safety: flag names are untrusted input to the agent, so anything that isn't a plain name is quoted, cut short and never
+offered for removal (a name with a newline can't forge an `evil on` line). The CLI's host-scoped credentials
+(`FLAGSMITH_API_KEY_<host>_<port>`) mean a self-hosted key is never sent to another host.
+
+**Demo run** (a coding agent on [flag-janitor-demo-shop](https://github.com/mohammedsharukhh/flag-janitor-demo-shop), self-hosted Flagsmith):
+removed `express_shipping` (codemod for the code, hand fix for the test mock) → [PR #3](https://github.com/mohammedsharukhh/flag-janitor-demo-shop/pull/3);
+skipped `holiday_banner` because PR #1 already exists. 23 turns, 78 s,
+**4,845 output tokens, 34 uncached input + 51,688 cache-write input tokens** (924,157 cache-read).
 
 ## Use it
 
