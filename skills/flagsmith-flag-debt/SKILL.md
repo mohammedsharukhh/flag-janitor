@@ -45,8 +45,11 @@ Nothing printed means nothing to do. Stop.
 
 ```sh
 git switch -c flag-debt/remove-<flag>
-npx -y github:mohammedsharukhh/flag-janitor rewrite <flag> on|off    # AST codemod, deterministic, offline
+npx -y "$JANITOR" rewrite <flag> on|off    # AST codemod, deterministic, offline
 ```
+
+`JANITOR=https://codeload.github.com/mohammedsharukhh/flag-janitor/tar.gz/c87748f83f787fc20d380de5dcad91eb45e0c07f`
+(pinned to a commit, so the code you run is the code that was reviewed).
 
 It prints `rewrote N file(s): …` and, if anything is left, `still mentions <flag> (fix by hand): …`.
 Fix those leftovers yourself (config entries, `getValue`, test mocks, docs): see
