@@ -13,6 +13,7 @@ const USAGE = `flag-janitor <command> [--dir <repo>] [--dry-run]
   scan            list stale flags and the files that use them
   run             remove each stale flag, run tests, open one PR per flag
   archive <flag>  archive the flag in Flagsmith (refuses while code still uses it)
+  rewrite <flag> on|off   only rewrite the code as if the flag were always on/off (no Flagsmith, no git)
   serve           receive Flagsmith webhooks: flip the run_cleanup flag ON to start the GitHub workflow
 
 env: FLAGSMITH_API_URL, FLAGSMITH_API_KEY (admin key), FLAGSMITH_ENVIRONMENT (env key whose values win),
@@ -173,6 +174,19 @@ async function serve() {
   await new Promise(() => {}); // run until killed
 }
 
-const commands = { scan, run, serve, archive: () => archive(flagArg) };
+// Offline building block for agents (the flagsmith-flag-debt skill): Flagsmith work goes through the Flagsmith CLI,
+// this only does the code. Output is kept to a line or two so it costs an agent few tokens.
+async function rewrite(name, value) {
+  if (!name || !['on', 'off'].includes(value)) throw new Error('usage: flag-janitor rewrite <flag> on|off');
+  if (!isSafeFlagName(name)) throw new Error(`unsafe flag name: ${JSON.stringify(name)}`);
+  const { changes, errors } = plan({ name, enabled: value === 'on' }, codeFiles());
+  for (const c of changes) fs.writeFileSync(path.join(dir, c.file), c.out);
+  console.log(`rewrote ${changes.length} file(s)${changes.length ? `: ${changes.map((c) => c.file).join(' ')}` : ''}`);
+  errors.forEach((e) => console.log(`parse error ${e}`));
+  const left = mentions(dir, name);
+  if (left.length) console.log(`still mentions ${name} (fix by hand): ${left.join(' ')}`);
+}
+
+const commands = { scan, run, serve, archive: () => archive(flagArg), rewrite: () => rewrite(flagArg, args[2]) };
 if (!commands[cmd]) { console.log(USAGE); process.exit(cmd ? 1 : 0); }
 commands[cmd]().catch((e) => { console.error(`flag-janitor: ${e.message}`); process.exit(1); });
