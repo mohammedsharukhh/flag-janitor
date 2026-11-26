@@ -1,0 +1,56 @@
+name: Flag Janitor
+description: Remove stale Flagsmith feature flags from your code, open one cleanup PR per flag, and archive the flag after merge.
+branding: { icon: trash-2, color: green }
+
+inputs:
+  command:
+    description: "run (open cleanup PRs), scan (report only) or archive (after a cleanup PR merges)"
+    default: run
+  flag:
+    description: "archive only: the flag name, or the cleanup PR branch (flag-janitor/remove-<flag>)"
+    default: ""
+  flagsmith-api-url:
+    description: "Your Flagsmith API, e.g. https://flagsmith.example.com/api/v1"
+    required: true
+  flagsmith-api-key:
+    description: "Flagsmith Admin API key"
+    required: true
+  flagsmith-environment:
+    description: "Environment key whose flag values are hard-coded (usually Production)"
+    required: true
+  janitor-environment-key:
+    description: "Optional environment key holding Flag Janitor's own gate flags (open_prs, archive_flags)"
+    default: ""
+  stale-tag:
+    description: "Tag that marks a flag for removal (Flagsmith's system Stale tag always counts)"
+    default: stale
+  github-token:
+    description: "Token used to push branches and open PRs"
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with: { node-version: 22 }
+    - shell: bash
+      run: npm ci --omit=dev --no-audit --no-fund --prefix "$GITHUB_ACTION_PATH"
+    - shell: bash
+      # Inputs go through env, never ${{ }} in the script: the branch name comes from the PR author.
+      env:
+        FLAGSMITH_API_URL: ${{ inputs.flagsmith-api-url }}
+        FLAGSMITH_API_KEY: ${{ inputs.flagsmith-api-key }}
+        FLAGSMITH_ENVIRONMENT: ${{ inputs.flagsmith-environment }}
+        JANITOR_ENVIRONMENT_KEY: ${{ inputs.janitor-environment-key }}
+        JANITOR_TAG: ${{ inputs.stale-tag }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        CMD: ${{ inputs.command }}
+        FLAG: ${{ inputs.flag }}
+      run: |
+        git config user.name "flag-janitor[bot]"
+        git config user.email "flag-janitor[bot]@users.noreply.github.com"
+        case "$CMD" in
+          archive) node "$GITHUB_ACTION_PATH/src/cli.js" archive "${FLAG#flag-janitor/remove-}" ;;
+          run|scan) node "$GITHUB_ACTION_PATH/src/cli.js" "$CMD" ;;
+          *) echo "Unknown command: $CMD"; exit 1 ;;
+        esac

@@ -1,0 +1,14 @@
+{
+  "name": "flag-janitor",
+  "version": "0.1.0",
+  "description": "Removes stale Flagsmith feature flags from your code and opens the cleanup PR.",
+  "type": "module",
+  "bin": { "flag-janitor": "src/cli.js" },
+  "scripts": { "test": "node --test test/" },
+  "engines": { "node": ">=20" },
+  "license": "MIT",
+  "dependencies": {
+    "flagsmith-nodejs": "^8.1.2",
+    "jscodeshift": "^17.4.0"
+  }
+}
