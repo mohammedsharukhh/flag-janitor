@@ -1,22 +1,47 @@
 # Flag Janitor
 
+[![test](https://github.com/mohammedsharukhh/flag-janitor/actions/workflows/test.yml/badge.svg)](https://github.com/mohammedsharukhh/flag-janitor/actions/workflows/test.yml)
+![Flagsmith: self-hosted](https://img.shields.io/badge/Flagsmith-self--hosted-6633ff)
+![license: MIT](https://img.shields.io/badge/license-MIT-green)
+
 Feature flags are easy to add and nobody removes them. Flagsmith already tells you a flag is **stale**.
 Flag Janitor does the boring part: it **deletes the flag from your code**, runs your tests, opens a PR,
 and once that PR merges it **archives the flag in Flagsmith**.
 
-```
-Flagsmith: "new_checkout is stale, ON for everyone in Production"
-        │
-        ▼
-flag-janitor run ──► rewrites code (keeps the live branch, deletes the dead one)
-                 ──► runs your tests ──► opens PR "Remove stale flag new_checkout"
-        │
-   you merge
-        ▼
-flag-janitor archive ──► checks no code still mentions the flag ──► archives it in Flagsmith
+```mermaid
+flowchart LR
+  A["Flagsmith<br/>flag tagged <b>stale</b><br/>ON for everyone"] -->|"run_cleanup ON<br/>(signed webhook) or schedule"| B["GitHub Action<br/>flag-janitor run"]
+  B --> C["AST codemod<br/>keep live branch,<br/>delete dead one"]
+  C --> D{"repo tests<br/>pass?"}
+  D -->|no| E["no PR"]
+  D -->|yes| F["PR: Remove stale flag"]
+  F -->|you merge| G{"any file still<br/>mentions the flag?"}
+  G -->|yes| H["refuse to archive"]
+  G -->|no| I["flag archived<br/>in Flagsmith"]
 ```
 
 Built for the self-hosted Flagsmith track: everything talks to your own Flagsmith instance.
+See it working: [demo-shop pull requests](https://github.com/mohammedsharukhh/flag-janitor-demo-shop/pulls) opened by the janitor.
+
+## Try it in 5 minutes
+
+```bash
+git clone https://github.com/mohammedsharukhh/flag-janitor && cd flag-janitor && npm install
+docker compose -f flagsmith/docker-compose.yml up -d     # self-hosted Flagsmith on http://localhost:8000
+```
+
+1. In Flagsmith, create a project, tag one flag `stale`, and create an **Admin API key** (Organisation settings → API Keys).
+2. Point the janitor at it and at any JS/TS repo that uses that flag:
+
+```bash
+export FLAGSMITH_API_URL=http://localhost:8000/api/v1
+export FLAGSMITH_API_KEY=...        # admin key
+export FLAGSMITH_ENVIRONMENT=...    # Production environment key
+node src/cli.js scan --dir ../your-app             # which stale flags, which files
+node src/cli.js run --dry-run --dir ../your-app    # the exact diffs, nothing written
+```
+
+Happy with the diff? Drop `--dry-run` (it opens one PR per flag via `gh`), or add the [GitHub Action](#github-action).
 
 ## What the rewrite looks like
 
@@ -157,5 +182,6 @@ docker compose -f flagsmith/docker-compose.yml up -d   # UI + API on http://loca
 - JS/TS only. Recognises `hasFeature('x')` and `isFeatureEnabled('x')` with a literal flag name.
 - Leaves now-unused variables/imports for your linter to flag.
 - Two flags in the same file give two PRs that may conflict; the next run rebases from main.
+- `serve` is tested with Docker Desktop on macOS (`host.docker.internal`). On Linux, run it with `JANITOR_HOST` set to the Docker bridge address and allow that host in `SSRF_ALLOWED_HOSTS`.
 
-MIT licence.
+[MIT licence](LICENSE).
