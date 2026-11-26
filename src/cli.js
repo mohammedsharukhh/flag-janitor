@@ -36,7 +36,7 @@ function plan(flag, files) {
   const errors = [];
   for (const f of files) {
     try {
-      const out = removeFlag(read(f), flag.name, flag.enabled);
+      const out = removeFlag(read(f), flag.name, flag.enabled, f);
       if (out !== null) changes.push({ file: f, out });
     } catch (e) {
       errors.push(`${f}: ${e.message.split('\n')[0]}`);

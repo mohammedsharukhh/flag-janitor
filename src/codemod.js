@@ -1,6 +1,9 @@
 import jscodeshift from 'jscodeshift';
 
-const j = jscodeshift.withParser('tsx');
+// .ts must use the TypeScript parser: `<Type>value` casts are legal there but read as JSX by the tsx parser.
+const PARSERS = { ts: jscodeshift.withParser('ts'), tsx: jscodeshift.withParser('tsx') };
+const parserFor = (file = '') => (/\.[mc]?ts$/.test(file) ? PARSERS.ts : PARSERS.tsx);
+let j = PARSERS.tsx; // builders (j.booleanLiteral, ...) are the same for both parsers
 // Flagsmith SDK calls that return a flag's on/off state.
 const CHECKS = new Set(['hasFeature', 'isFeatureEnabled']);
 
@@ -20,9 +23,10 @@ const declaresNames = (stmts) =>
 
 /**
  * Hard-code a flag to its production value and delete the dead branch.
- * Returns the new source, or null when the file never checks this flag.
+ * Returns the new source, or null when the file never checks this flag. `file` picks the parser by extension.
  */
-export function removeFlag(source, flag, enabled) {
+export function removeFlag(source, flag, enabled, file) {
+  j = parserFor(file);
   const root = j(source);
   const hits = root.find(j.CallExpression).filter((p) => {
     const c = p.node.callee;

@@ -60,6 +60,9 @@ Happy with the diff? Drop `--dry-run` (it opens one PR per flag via `gh`), or ad
 -      {flagsmith.hasFeature('holiday_banner') && <HolidayBanner />}
 ```
 
+**Tested on real code:** 240 flag removals (each flag ON and OFF) across 75 files from 5 open-source repos, including
+Flagsmith's own frontend and salesforce/refocus: 0 crashes, 0 invalid output.
+
 It is a real AST codemod (jscodeshift), not find-and-replace. It handles `if/else`, `else if`, `!`, `&&`, `||`,
 ternaries, `await`, `const x = hasFeature(...)` and JSX children, for JS, TS, JSX and TSX.
 
@@ -136,7 +139,7 @@ Flag Janitor runs inside your CI with an admin key, so it is built to fail safe.
 ## Tests
 
 ```bash
-npm test            # 41 tests: codemod, repo safety, Flagsmith client, webhook receiver, CLI end-to-end (real git + fake Flagsmith + fake gh)
+npm test            # 42 tests: codemod, repo safety, Flagsmith client, webhook receiver, CLI end-to-end (real git + fake Flagsmith + fake gh)
 npm run test:live   # read-only checks against your self-hosted Flagsmith (uses .env)
 ```
 

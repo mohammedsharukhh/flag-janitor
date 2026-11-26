@@ -74,3 +74,9 @@ test('early return: code after the kept return is dead and goes too', () => {
   check(`function f() { if (hasFeature('x')) return a(); log(); function a() {} var v; }`, 'x', true,
     'function f() { return a(); function a() {} var v; }');
 });
+
+test('.ts files use the TypeScript parser (old-style <Type>value casts)', () => {
+  const src = `const v = ref(<Farm[]>[]); if (flagsmith.hasFeature('x')) { load(<any>window); } else { skip(); }`;
+  assert.equal(clean(removeFlag(src, 'x', true, 'src/farm.ts')), clean('const v = ref(<Farm[]>[]); load(<any>window);'));
+  assert.equal(clean(removeFlag(`const A = () => <div>{hasFeature('x') && <B />}</div>;`, 'x', false, 'a.tsx')), clean('const A = () => <div></div>;'));
+});
