@@ -4,6 +4,8 @@
 ![Flagsmith: self-hosted](https://img.shields.io/badge/Flagsmith-self--hosted-6633ff)
 ![license: MIT](https://img.shields.io/badge/license-MIT-green)
 
+▶️ **[Demo video (3:49)](https://youtu.be/wpy3_ohiugY)**
+
 Feature flags are easy to add and nobody removes them. Flagsmith already tells you a flag is **stale**.
 Flag Janitor does the boring part: it **deletes the flag from your code**, runs your tests, opens a PR,
 and once that PR merges it **archives the flag in Flagsmith**.
