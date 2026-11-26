@@ -77,7 +77,7 @@ Flag Janitor runs inside your CI with an admin key, so it is built to fail safe.
 ## Tests
 
 ```bash
-npm test            # 30 tests: codemod, repo safety, Flagsmith client, CLI end-to-end (real git + fake Flagsmith + fake gh)
+npm test            # 31 tests: codemod, repo safety, Flagsmith client, CLI end-to-end (real git + fake Flagsmith + fake gh)
 npm run test:live   # read-only checks against your self-hosted Flagsmith (uses .env)
 ```
 
