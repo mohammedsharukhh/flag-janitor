@@ -39,3 +39,28 @@ test('JSX children', () => {
   check(`const A = () => <div>{hasFeature('x') && <Banner />}<Main /></div>;`, 'x', false, 'const A = () => <div><Main /></div>;');
   check(`const A = () => <div>{hasFeature('x') && <Banner />}</div>;`, 'x', true, 'const A = () => <div><Banner /></div>;');
 });
+
+test('if without braces in a loop body or nested if stays valid code', () => {
+  check(`for (const i of xs) if (hasFeature('x')) a(i);`, 'x', false, 'for (const i of xs) {}');
+  check(`for (const i of xs) if (hasFeature('x')) a(i);`, 'x', true, 'for (const i of xs) a(i);');
+  check(`if (a) if (hasFeature('x')) b();`, 'x', false, 'if (a) {}');
+  check(`while (go()) if (!hasFeature('x')) { b(); c(); }`, 'x', false, 'while (go()) { b(); c(); }');
+});
+
+test('optional call flags?.isFeatureEnabled', () => {
+  check(`if (flags?.isFeatureEnabled('x')) { a(); }`, 'x', true, 'a();');
+});
+
+test('exported const keeps its export', () => {
+  check(`export const showX = hasFeature('x');`, 'x', true, 'export const showX = true;');
+  check(`const showX = hasFeature('x'); export { showX };`, 'x', true, 'const showX = true; export { showX };');
+});
+
+test('shorthand property and TS typeof keep working', () => {
+  check(`const on = hasFeature('x'); return { on, off: !on };`, 'x', true, 'return { on: true, off: false };');
+  check(`const on = hasFeature('x'); let t: typeof on = on;`, 'x', false, 'const on = false; let t: typeof on = on;'); // type use: keep the const
+});
+
+test('does not touch a different flag or a non-literal name', () => {
+  assert.equal(removeFlag(`hasFeature('x_v2'); hasFeature(name);`, 'x', true), null);
+});

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { removeFlag } from './codemod.js';
 import { findStaleFlags, archiveFlag, gate } from './flagsmith.js';
+import { listCodeFiles, mentions, isSafeFlagName } from './repo.js';
 
 const USAGE = `flag-janitor <command> [--dir <repo>] [--dry-run]
 
@@ -22,16 +23,9 @@ const dir = path.resolve(opt('--dir') || '.');
 const dryRun = args.includes('--dry-run') && args.splice(args.indexOf('--dry-run'), 1);
 const [cmd, flagArg] = args;
 
-const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.next']);
-const codeFiles = () => fs.readdirSync(dir, { recursive: true })
-  .filter((f) => /\.(m|c)?[jt]sx?$/.test(f) && !f.split(path.sep).some((p) => SKIP_DIRS.has(p)));
+const codeFiles = () => listCodeFiles(dir);
 const read = (f) => fs.readFileSync(path.join(dir, f), 'utf8');
 const sh = (bin, a) => execFileSync(bin, a, { cwd: dir, encoding: 'utf8' }).trim();
-// Any quoted mention of the flag the codemod did not handle (getValue, config, docs-in-code...).
-const mentions = (name, files) => {
-  const re = new RegExp(`['"\`]${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"\`]`);
-  return files.filter((f) => re.test(read(f)));
-};
 
 function plan(flag, files) {
   const changes = [];
@@ -48,11 +42,17 @@ function plan(flag, files) {
 }
 
 function diff(file, out) {
-  const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'janitor-')), path.basename(file));
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'janitor-'));
+  const tmp = path.join(tmpDir, path.basename(file));
   fs.writeFileSync(tmp, out);
   const r = spawnSync('git', ['diff', '--no-index', '--color=always', path.join(dir, file), tmp], { encoding: 'utf8' });
+  fs.rmSync(tmpDir, { recursive: true, force: true });
   return r.stdout.replaceAll(`a${path.join(dir, file)}`, `a/${file}`).replaceAll(`b${tmp}`, `b/${file}`);
 }
+
+// The repo's tests are arbitrary code: they must not be able to read our credentials.
+const SECRETS = ['FLAGSMITH_API_KEY', 'JANITOR_ENVIRONMENT_KEY', 'GH_TOKEN', 'GITHUB_TOKEN', 'ACTIONS_RUNTIME_TOKEN', 'ACTIONS_ID_TOKEN_REQUEST_TOKEN'];
+const testEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !SECRETS.includes(k)));
 
 function testCommand() {
   if (process.env.TEST_CMD) return process.env.TEST_CMD;
@@ -80,6 +80,7 @@ async function run() {
   if (!dryRun && !live) console.log('Flagsmith flag "open_prs" is off: dry run only.');
   if (live && sh('git', ['status', '--porcelain'])) throw new Error('Working tree has uncommitted changes; commit or stash first.');
   const baseBranch = live && sh('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
+  if (baseBranch === 'HEAD') throw new Error('Detached HEAD: check out the branch the PRs should target.');
   const test = testCommand();
 
   for (const flag of flags) {
@@ -89,18 +90,19 @@ async function run() {
     if (!live) { changes.forEach((c) => process.stdout.write(diff(c.file, c.out))); continue; }
 
     const branch = `flag-janitor/remove-${flag.name}`;
-    if (sh('gh', ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number', '--jq', 'length']) !== '0') {
-      console.log(`  PR already open for ${branch}`); continue;
-    }
+    const states = sh('gh', ['pr', 'list', '--head', branch, '--state', 'all', '--json', 'state', '--jq', '[.[].state] | join(",")']);
+    if (states.includes('OPEN')) { console.log(`  PR already open for ${branch}`); continue; }
+    // A human said no. Respect it until they remove the stale tag or reopen the PR.
+    if (states.includes('CLOSED')) { console.log(`  a PR for ${branch} was closed without merging; skipping`); continue; }
     sh('git', ['checkout', '-B', branch]);
     try {
       changes.forEach((c) => fs.writeFileSync(path.join(dir, c.file), c.out));
-      const t = test && spawnSync(test, { cwd: dir, shell: true, encoding: 'utf8' });
+      const t = test && spawnSync(test, { cwd: dir, shell: true, encoding: 'utf8', env: testEnv() });
       if (t && t.status !== 0) {
         console.log(`  tests failed, no PR:\n${(t.stdout + t.stderr).slice(-1500)}`);
         continue;
       }
-      const left = mentions(flag.name, files);
+      const left = mentions(dir, flag.name);
       sh('git', ['commit', '-am', `chore: remove stale flag ${flag.name}`]);
       sh('git', ['push', '-f', '-u', 'origin', branch]);
       const url = sh('gh', ['pr', 'create', '--base', baseBranch, '--head', branch,
@@ -121,14 +123,15 @@ function prBody(flag, changes, test, left, errors) {
     '', `**Tests:** ${test ? `\`${test}\` passed` : 'no test command found, please check manually'}`,
     ...(left.length || errors.length ? ['', '**Needs a human look** (flag still mentioned, or file could not be parsed):',
       ...left.map((f) => `- \`${f}\``), ...errors.map((e) => `- ${e}`)] : []),
-    '', `After merge, Flag Janitor archives \`${flag.name}\` in Flagsmith (only once no code mentions it).`,
+    '', `After merge, Flag Janitor archives \`${flag.name}\` in Flagsmith (only once no file in the repo mentions it).`,
     '', '_Opened by [Flag Janitor](https://github.com/mohammedsharukhh/flag-janitor)._',
   ].join('\n');
 }
 
 async function archive(name) {
   if (!name) throw new Error('usage: flag-janitor archive <flag>');
-  const left = mentions(name, codeFiles());
+  if (!isSafeFlagName(name)) throw new Error(`Refusing unsafe flag name: ${JSON.stringify(name)}`);
+  const left = mentions(dir, name);
   if (left.length) throw new Error(`Not archiving ${name}: still mentioned in ${left.join(', ')}`);
   if (!dryRun && !(await gate('archive_flags'))) return console.log('Flagsmith flag "archive_flags" is off: not archiving.');
   if (dryRun) return console.log(`Would archive ${name}.`);

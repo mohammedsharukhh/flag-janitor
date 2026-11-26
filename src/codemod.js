@@ -65,7 +65,9 @@ function fold(root) {
 
   root.find(j.IfStatement).filter((p) => isBool(p.node.test)).forEach(mark((p) => {
     const kept = p.node.test.value ? p.node.consequent : p.node.alternate;
-    if (p.parent.node.type === 'IfStatement') return p.replace(kept); // else-if chain: null drops the else
+    if (p.parent.node.type === 'IfStatement' && p.name === 'alternate') return p.replace(kept); // else-if: null drops the else
+    // A single-statement slot (loop body, `if (a) if (...)`) must keep exactly one statement.
+    if (!Array.isArray(p.parentPath.value)) return p.replace(kept || j.blockStatement([]));
     if (!kept) return p.prune();
     const body = kept.type === 'BlockStatement' ? kept.body : [kept];
     if (kept.type === 'BlockStatement' && declaresNames(body)) return p.replace(kept);
@@ -73,16 +75,23 @@ function fold(root) {
   }));
 
   // const showX = true;  ->  inline every use, then drop the declaration.
+  // Kept as-is when exported or used in a type (`typeof x`): removing it would break other modules or types.
   root.find(j.VariableDeclarator).filter((p) =>
-    p.parent.node.kind === 'const' && p.node.id.type === 'Identifier' && isBool(p.node.init)
+    p.parent.node.kind === 'const' && p.node.id.type === 'Identifier' && isBool(p.node.init) &&
+    p.parent.parent.node.type !== 'ExportNamedDeclaration' &&
+    !root.find(j.ExportSpecifier, { local: { name: p.node.id.name } }).size() &&
+    !root.find(j.TSTypeQuery, { exprName: { name: p.node.id.name } }).size()
   ).forEach(mark((p) => {
     const { name } = p.node.id;
     const scope = p.scope;
     root.find(j.Identifier, { name }).filter((ip) =>
       ip.node !== p.node.id && ip.scope?.lookup(name) === scope &&
       !(ip.parent.node.type === 'MemberExpression' && ip.name === 'property' && !ip.parent.node.computed) &&
-      !(['ObjectProperty', 'Property'].includes(ip.parent.node.type) && ip.name === 'key' && !ip.parent.node.shorthand)
-    ).replaceWith(() => j.booleanLiteral(p.node.init.value));
+      !(['ObjectProperty', 'Property'].includes(ip.parent.node.type) && ip.name === 'key')
+    ).forEach((ip) => {
+      if (ip.parent.node.shorthand) ip.parent.node.shorthand = false; // { on } -> { on: true }
+      ip.replace(j.booleanLiteral(p.node.init.value));
+    });
     const decl = p.parent;
     if (decl.node.declarations.length === 1) decl.prune(); else p.prune();
   }));
