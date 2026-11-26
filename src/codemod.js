@@ -12,6 +12,7 @@ const isPure = (n) =>
   (n.type === 'MemberExpression' && !n.computed && isPure(n.object));
 const inTest = (p) =>
   ['IfStatement', 'ConditionalExpression', 'WhileStatement'].includes(p.parent.node.type) && p.name === 'test';
+const EXITS = new Set(['ReturnStatement', 'ThrowStatement', 'BreakStatement', 'ContinueStatement']);
 // let/const/class/function at block top level would leak or clash if we unwrap the block.
 const declaresNames = (stmts) =>
   stmts.some((s) => s.type === 'ClassDeclaration' || s.type === 'FunctionDeclaration' ||
@@ -70,6 +71,13 @@ function fold(root) {
     if (!Array.isArray(p.parentPath.value)) return p.replace(kept || j.blockStatement([]));
     if (!kept) return p.prune();
     const body = kept.type === 'BlockStatement' ? kept.body : [kept];
+    if (EXITS.has(body.at(-1)?.type)) {
+      // `if (flag) return a; return b;` -> what follows the kept exit is unreachable. Hoisted declarations stay.
+      const list = p.parentPath.value;
+      const i = list.indexOf(p.node);
+      const hoisted = list.slice(i + 1).filter((s) => s.type === 'FunctionDeclaration' || (s.type === 'VariableDeclaration' && s.kind === 'var'));
+      list.splice(i + 1, Infinity, ...hoisted);
+    }
     if (kept.type === 'BlockStatement' && declaresNames(body)) return p.replace(kept);
     return body.length ? p.replace(...body) : p.prune();
   }));

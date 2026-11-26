@@ -64,3 +64,13 @@ test('shorthand property and TS typeof keep working', () => {
 test('does not touch a different flag or a non-literal name', () => {
   assert.equal(removeFlag(`hasFeature('x_v2'); hasFeature(name);`, 'x', true), null);
 });
+
+test('early return: code after the kept return is dead and goes too', () => {
+  const src = `function f() { if (hasFeature('x')) { return 1; } return 2; }`;
+  check(src, 'x', true, 'function f() { return 1; }');
+  check(src, 'x', false, 'function f() { return 2; }');
+  check(`function f() { if (!hasFeature('x')) throw new Error('off'); go(); }`, 'x', false, `function f() { throw new Error('off'); }`);
+  // hoisted declarations after the return are still reachable: keep them
+  check(`function f() { if (hasFeature('x')) return a(); log(); function a() {} var v; }`, 'x', true,
+    'function f() { return a(); function a() {} var v; }');
+});
