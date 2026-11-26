@@ -72,7 +72,7 @@ Flag Janitor runs inside your CI with an admin key, so it is built to fail safe.
 | Shell injection through flag names or branch names | No shell: every git/gh call passes arguments as an array; Action inputs go through `env` |
 | A human closes a cleanup PR, then gets it again every week | A closed-unmerged PR for that flag means skip |
 | Uncommitted local work gets lost | Refuses to run on a dirty tree |
-| A third-party Action tag gets hijacked | `actions/setup-node` is pinned to a commit SHA; `npm ci` uses the lockfile |
+| A third-party Action tag gets hijacked | `actions/checkout` and `actions/setup-node` are pinned to a commit SHA; `npm ci` uses the lockfile |
 
 ## Tests
 
