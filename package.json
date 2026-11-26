@@ -15,7 +15,7 @@
   },
   "license": "MIT",
   "dependencies": {
-    "flagsmith-nodejs": "^8.1.2",
+    "@flagsmith/nodejs": "^9.5.0",
     "jscodeshift": "^17.4.0"
   }
 }

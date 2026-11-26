@@ -46,7 +46,7 @@ ternaries, `await`, `const x = hasFeature(...)` and JSX children, for JS, TS, JS
 | **Production environment state** | whether to keep the ON or the OFF branch |
 | **Segment / identity overrides, multivariate** | safety: a flag that isn't one value for everyone is skipped |
 | **Admin API, archive** | archive the flag after the cleanup PR merges |
-| **flagsmith-nodejs SDK, its own flags** | dogfooding: `open_prs` and `archive_flags` flags switch the janitor's own risky actions on/off |
+| **@flagsmith/nodejs SDK, its own flags** | dogfooding: `open_prs` and `archive_flags` flags switch the janitor's own risky actions on/off |
 
 Turn `open_prs` off in Flagsmith and the janitor only prints diffs. No redeploy, no config change.
 

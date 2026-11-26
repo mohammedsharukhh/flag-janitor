@@ -1,4 +1,4 @@
-import { Flagsmith } from 'flagsmith-nodejs';
+import { Flagsmith } from '@flagsmith/nodejs';
 import { isSafeFlagName } from './repo.js';
 
 const env = process.env;
