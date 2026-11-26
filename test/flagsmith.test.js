@@ -69,3 +69,14 @@ test('no gate key means no gates', async () => {
   after(restore);
   assert.equal(await gate('open_prs'), true);
 });
+
+test('switchOff turns a janitor flag back off in its environment', async () => {
+  const { switchOff } = await import('../src/flagsmith.js');
+  const fs = await fakeFlagsmith({ janitorFlags: { open_prs: true, run_cleanup: true } });
+  const restore = env(fs, { JANITOR_ENVIRONMENT_KEY: 'janitor-key' });
+  after(() => { restore(); fs.close(); });
+  await switchOff(2);
+  assert.equal(fs.janitorFlags.run_cleanup, false);
+  assert.equal(fs.janitorFlags.open_prs, true);
+  await assert.rejects(switchOff(99), /No environment state/);
+});

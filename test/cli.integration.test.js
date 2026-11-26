@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawn } from 'node:child_process';
-import { fakeFlagsmith } from './helpers/fake-flagsmith.js';
+import { fakeFlagsmith, flagUpdated } from './helpers/fake-flagsmith.js';
 
 const CLI = path.resolve('src/cli.js');
 const servers = [];
@@ -26,7 +26,8 @@ function setup({ files = APP, features, janitorFlags } = {}) {
   const ghLog = path.join(tmp, 'gh.log');
   fs.mkdirSync(bin);
   // Fake gh: `pr list` answers $FAKE_GH_STATES (e.g. OPEN, CLOSED); `pr create` prints a URL. Logs every call, one per line.
-  fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${ghLog}"\ncase "$1 $2" in "pr list") echo "$FAKE_GH_STATES";; "pr create") echo https://github.com/o/r/pull/1;; esac\n`, { mode: 0o755 });
+  fs.writeFileSync(path.join(bin, 'gh'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${ghLog}"\n[ "$1 $2" = "workflow run" ] && [ -n "$FAKE_GH_FAIL" ] && exit 1
+case "$1 $2" in "pr list") echo "$FAKE_GH_STATES";; "pr create") echo https://github.com/o/r/pull/1;; esac\n`, { mode: 0o755 });
   for (const [f, body] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true });
     fs.writeFileSync(path.join(repo, f), body);
@@ -169,4 +170,59 @@ test('run: a PR a human closed is not reopened every week', async () => {
     assert.match(r.out, msg);
     assert.deepEqual(remoteBranches(ctx), ['main']);
   }
+});
+
+// `flag-janitor serve`: signed Flagsmith webhook in -> GitHub workflow dispatched -> run_cleanup switched back off.
+async function serve(ctx, janitorFlags, extraEnv = {}) {
+  const fsm = await fakeFlagsmith({ janitorFlags });
+  servers.push(fsm);
+  const env = { ...process.env, PATH: `${ctx.bin}:${process.env.PATH}`, FLAGSMITH_API_URL: fsm.url, FLAGSMITH_API_KEY: 'admin-key',
+    FLAGSMITH_ENVIRONMENT: 'prod-key', JANITOR_ENVIRONMENT_KEY: 'janitor-key', JANITOR_WEBHOOK_SECRET: 'hook-secret-for-tests-only',
+    JANITOR_DISPATCH_REPO: 'o/demo', JANITOR_PORT: '0', ...extraEnv };
+  delete env.NODE_TEST_CONTEXT;
+  const child = spawn('node', [CLI, 'serve'], { env });
+  after(() => child.kill());
+  let out = '';
+  child.stdout.on('data', (d) => { out += d; });
+  child.stderr.on('data', (d) => { out += d; });
+  const port = await new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`serve did not start: ${out}`)), 5000);
+    child.stdout.on('data', () => { const m = out.match(/listening on http:\/\/127\.0\.0\.1:(\d+)/); if (m) { clearTimeout(t); resolve(m[1]); } });
+    child.on('exit', () => { clearTimeout(t); reject(new Error(`serve exited: ${out}`)); });
+  });
+  const post = (p) => fetch(`http://127.0.0.1:${port}/webhook`, { method: 'POST', body: p.body, headers: { 'X-Flagsmith-Signature': p.signature } });
+  return { fsm, post, out: () => out, gh: () => (fs.existsSync(ctx.ghLog) ? fs.readFileSync(ctx.ghLog, 'utf8') : '') };
+}
+
+test('serve: flipping run_cleanup ON in Flagsmith dispatches the workflow and flips it back', async () => {
+  const ctx = setup();
+  const s = await serve(ctx, { open_prs: true, run_cleanup: true });
+  const r = await s.post(flagUpdated({ id: 2 }));
+  assert.equal(r.status, 202, s.out());
+  assert.match(s.gh(), /^workflow run flag-janitor\.yml -R o\/demo$/m);
+  assert.equal(s.fsm.janitorFlags.run_cleanup, false);
+});
+
+test('serve: a replayed webhook does nothing when run_cleanup is actually off', async () => {
+  const ctx = setup();
+  const s = await serve(ctx, { open_prs: true, run_cleanup: false });
+  const r = await s.post(flagUpdated({ id: 2 }));
+  assert.equal(r.status, 202);
+  assert.equal(s.gh(), '');
+  assert.match(s.out(), /run_cleanup is off in Flagsmith/);
+});
+
+test('serve: refuses to start without a webhook secret or with a bad repo name', async () => {
+  const ctx = setup();
+  for (const [extra, msg] of [[{ JANITOR_WEBHOOK_SECRET: '' }, /JANITOR_WEBHOOK_SECRET/], [{ JANITOR_DISPATCH_REPO: 'o/demo;touch pwned' }, /JANITOR_DISPATCH_REPO/]]) {
+    await assert.rejects(serve(ctx, {}, extra), msg);
+  }
+});
+
+test('serve: if starting the workflow fails, run_cleanup is still switched back off', async () => {
+  const ctx = setup();
+  const s = await serve(ctx, { open_prs: true, run_cleanup: true }, { FAKE_GH_FAIL: '1' });
+  const r = await s.post(flagUpdated({ id: 2 }));
+  assert.equal(r.status, 500);
+  assert.equal(s.fsm.janitorFlags.run_cleanup, false); // the button works again next time
 });

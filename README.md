@@ -47,6 +47,7 @@ ternaries, `await`, `const x = hasFeature(...)` and JSX children, for JS, TS, JS
 | **Segment / identity overrides, multivariate** | safety: a flag that isn't one value for everyone is skipped |
 | **Admin API, archive** | archive the flag after the cleanup PR merges |
 | **@flagsmith/nodejs SDK, its own flags** | dogfooding: `open_prs` and `archive_flags` flags switch the janitor's own risky actions on/off |
+| **Signed webhooks** | flip the `run_cleanup` flag ON in Flagsmith and the cleanup workflow starts; the flag switches itself back off |
 
 Turn `open_prs` off in Flagsmith and the janitor only prints diffs. No redeploy, no config change.
 
@@ -56,6 +57,35 @@ Turn `open_prs` off in Flagsmith and the janitor only prints diffs. No redeploy,
 - Never opens a PR if your tests fail.
 - Never archives a flag while any code still mentions it (catches `getValue('x')`, config, anything the codemod didn't rewrite).
 - Refuses to run on a dirty git tree. One PR per flag; won't open a duplicate.
+
+## Run it from Flagsmith
+
+Flagsmith is the janitor's control panel. Flip **`run_cleanup`** ON and the cleanup starts:
+
+```
+Flagsmith: run_cleanup OFF -> ON
+   │  signed FLAG_UPDATED webhook (HMAC-SHA256)
+   ▼
+flag-janitor serve ──► verifies signature ──► re-checks the flag is really ON
+                   ──► gh workflow run flag-janitor.yml ──► switches run_cleanup back OFF
+```
+
+Setup (self-hosted):
+
+1. In the project that holds `open_prs` / `archive_flags`, add a flag **`run_cleanup`** (off).
+2. That environment → **Settings → Webhooks** → add `http://host.docker.internal:8788/webhook` with a secret.
+3. Self-hosted Flagsmith refuses webhooks to private addresses (SSRF protection). Allow exactly this one host with
+   `SSRF_ALLOWED_HOSTS=host.docker.internal` (already set in [`flagsmith/docker-compose.yml`](flagsmith/docker-compose.yml)).
+4. Start the receiver:
+
+```bash
+export JANITOR_WEBHOOK_SECRET=...          # same secret as the webhook, 16+ chars
+export JANITOR_DISPATCH_REPO=owner/repo    # repo whose flag-janitor.yml workflow to start
+node src/cli.js serve                      # listens on 127.0.0.1:8788
+```
+
+Why a switch and not "tag a flag stale and it runs"? Flagsmith sends no webhook or audit event when only a flag's
+tags change (we checked against self-hosted Flagsmith), so a state change is the reliable trigger.
 
 ## Security
 
@@ -69,6 +99,10 @@ Flag Janitor runs inside your CI with an admin key, so it is built to fail safe.
 | A pagination link points to another host and receives the admin key | Only the path of `next` is used; requests always go to your configured Flagsmith |
 | A symlink or git-ignored file makes the janitor write outside the repo or leave changes behind | Only tracked, non-symlink files are rewritten |
 | Flagsmith is down and the gate can't be read | Gate fails **closed**: no PRs, no archiving |
+| A forged or replayed webhook starts runs | `serve` verifies Flagsmith's HMAC signature (constant-time), then re-reads `run_cleanup` from Flagsmith and does nothing unless it is really ON |
+| Flagsmith delivers the same webhook twice (it does) | One run per flip; repeats within 30 s are ignored |
+| A run fails and the switch stays stuck ON | `run_cleanup` is switched back off even when starting the workflow fails |
+| Junk or slow requests at the receiver | 64 KB body limit, 10 s request timeout, POST only, binds to 127.0.0.1, secret must be 16+ chars |
 | Shell injection through flag names or branch names | No shell: every git/gh call passes arguments as an array; Action inputs go through `env` |
 | A human closes a cleanup PR, then gets it again every week | A closed-unmerged PR for that flag means skip |
 | Uncommitted local work gets lost | Refuses to run on a dirty tree |
@@ -77,7 +111,7 @@ Flag Janitor runs inside your CI with an admin key, so it is built to fail safe.
 ## Tests
 
 ```bash
-npm test            # 31 tests: codemod, repo safety, Flagsmith client, CLI end-to-end (real git + fake Flagsmith + fake gh)
+npm test            # 41 tests: codemod, repo safety, Flagsmith client, webhook receiver, CLI end-to-end (real git + fake Flagsmith + fake gh)
 npm run test:live   # read-only checks against your self-hosted Flagsmith (uses .env)
 ```
 

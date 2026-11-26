@@ -38,6 +38,10 @@ x-flagsmith-env: &flagsmith-env
   # For production, connect a dedicated warehouse.
   EXPERIMENTATION_ENABLED: 'true'
 
+  # Flag Janitor: let Flagsmith send its audit-log webhook to `flag-janitor serve` on this machine.
+  # Only this one host is exempt from Flagsmith's SSRF protection; everything else stays blocked.
+  SSRF_ALLOWED_HOSTS: host.docker.internal
+
 volumes:
   pgdata:
 

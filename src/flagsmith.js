@@ -85,3 +85,12 @@ export async function gate(name) {
     return false; // fail closed: no answer means no risky action
   }
 }
+
+/** Turn one of Flag Janitor's own flags off again (run_cleanup acts like a button). Uses the admin key. */
+export async function switchOff(featureId) {
+  const key = encodeURIComponent(need('JANITOR_ENVIRONMENT_KEY'));
+  const state = (await api(`/environments/${key}/featurestates/?feature=${Number(featureId)}`)).results
+    .find((s) => !s.identity && !s.feature_segment);
+  if (!state) throw new Error(`No environment state for feature ${featureId}`);
+  await api(`/environments/${key}/featurestates/${state.id}/`, { method: 'PATCH', body: JSON.stringify({ enabled: false }) });
+}

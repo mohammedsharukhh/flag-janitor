@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { removeFlag } from './codemod.js';
-import { findStaleFlags, archiveFlag, gate } from './flagsmith.js';
+import { findStaleFlags, archiveFlag, gate, switchOff } from './flagsmith.js';
+import { createWebhookServer, RUN_FLAG } from './serve.js';
 import { listCodeFiles, mentions, isSafeFlagName } from './repo.js';
 
 const USAGE = `flag-janitor <command> [--dir <repo>] [--dry-run]
@@ -12,10 +13,13 @@ const USAGE = `flag-janitor <command> [--dir <repo>] [--dry-run]
   scan            list stale flags and the files that use them
   run             remove each stale flag, run tests, open one PR per flag
   archive <flag>  archive the flag in Flagsmith (refuses while code still uses it)
+  serve           receive Flagsmith webhooks: flip the run_cleanup flag ON to start the GitHub workflow
 
 env: FLAGSMITH_API_URL, FLAGSMITH_API_KEY (admin key), FLAGSMITH_ENVIRONMENT (env key whose values win),
      JANITOR_TAG (default "stale"), JANITOR_ENVIRONMENT_KEY (optional, gates janitor's own actions),
-     TEST_CMD (default "npm test" when package.json has a test script)`;
+     TEST_CMD (default "npm test" when package.json has a test script)
+serve: JANITOR_WEBHOOK_SECRET (same secret as the Flagsmith webhook), JANITOR_DISPATCH_REPO (owner/repo),
+       JANITOR_WORKFLOW (default flag-janitor.yml), JANITOR_HOST (default 127.0.0.1), JANITOR_PORT (default 8788)`;
 
 const args = process.argv.slice(2);
 const opt = (name) => { const i = args.indexOf(name); return i < 0 ? null : args.splice(i, 2)[1]; };
@@ -138,6 +142,37 @@ async function archive(name) {
   console.log((await archiveFlag(name)) ? `Archived ${name} in Flagsmith.` : `${name} was already archived.`);
 }
 
-const commands = { scan, run, archive: () => archive(flagArg) };
+async function serve() {
+  const env = process.env;
+  const secret = env.JANITOR_WEBHOOK_SECRET;
+  if (!secret || secret.length < 16) throw new Error('Set JANITOR_WEBHOOK_SECRET (16+ chars, same as the Flagsmith webhook secret).');
+  const repo = env.JANITOR_DISPATCH_REPO || '';
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw new Error('Set JANITOR_DISPATCH_REPO to owner/repo.');
+  const workflow = env.JANITOR_WORKFLOW || 'flag-janitor.yml';
+  if (!/^[A-Za-z0-9_.-]+\.ya?ml$/.test(workflow)) throw new Error('JANITOR_WORKFLOW must be a workflow file name.');
+  if (!env.JANITOR_ENVIRONMENT_KEY) throw new Error('Set JANITOR_ENVIRONMENT_KEY (the environment that holds run_cleanup).');
+
+  const server = createWebhookServer({
+    secret,
+    onTrigger: async (payload) => {
+      // Never trust the payload alone: a replayed webhook must not start a run while the flag is off.
+      if (!(await gate(RUN_FLAG))) return console.log(`${RUN_FLAG} is off in Flagsmith; ignoring (replayed webhook?)`);
+      try {
+        execFileSync('gh', ['workflow', 'run', workflow, '-R', repo], { encoding: 'utf8' });
+        console.log(`${new Date().toISOString()} started ${workflow} on ${repo}`);
+      } finally {
+        await switchOff(payload.data.new_state.feature.id); // reset even on failure, or the button sticks ON
+        console.log(`${RUN_FLAG} switched back off`);
+      }
+    },
+  });
+  server.requestTimeout = 10_000; // a slow client cannot hold connections open
+  const host = env.JANITOR_HOST || '127.0.0.1';
+  server.listen(Number(env.JANITOR_PORT ?? 8788), host, () =>
+    console.log(`flag-janitor serve listening on http://${host}:${server.address().port}`));
+  await new Promise(() => {}); // run until killed
+}
+
+const commands = { scan, run, serve, archive: () => archive(flagArg) };
 if (!commands[cmd]) { console.log(USAGE); process.exit(cmd ? 1 : 0); }
 commands[cmd]().catch((e) => { console.error(`flag-janitor: ${e.message}`); process.exit(1); });
