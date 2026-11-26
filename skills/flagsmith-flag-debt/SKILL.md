@@ -74,8 +74,8 @@ git push -u origin flag-debt/remove-<flag>
 gh pr create --title "Remove stale flag <flag>" --body "Flagsmith marks <flag> stale; it is <ON|OFF> for everyone in production. This hard-codes that value and deletes the dead branch. Tests pass. Archive the flag after merge."
 ```
 
-One flag per PR. Before creating, `gh pr list --head flag-debt/remove-<flag> --state all` must be empty: an open PR
-means it's in progress, a closed one means a human said no. Skip both.
+One flag per PR. Check first, before step 2 even: `gh pr list --state all --search '"<flag>" in:title' --json number,state`
+must be empty. An open PR means someone is on it; a closed one means a human said no. Skip both.
 
 ## 4. After the PR is merged: archive (ask first)
 
