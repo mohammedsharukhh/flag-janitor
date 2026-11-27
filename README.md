@@ -10,6 +10,19 @@ Feature flags are easy to add and nobody removes them. Flagsmith already tells y
 Flag Janitor does the boring part: it **deletes the flag from your code**, runs your tests, opens a PR,
 and once that PR merges it **archives the flag in Flagsmith**.
 
+`old_search` is tagged stale and is ON in production, so the janitor keeps the ON branch and deletes the rest
+(real diff from [demo-shop PR #2](https://github.com/mohammedsharukhh/flag-janitor-demo-shop/pull/2)):
+
+```diff
+ export function search(products, query, flags) {
+-  if (flags.isFeatureEnabled('old_search')) {
+-    return products.filter((p) => p.name.startsWith(query));
+-  }
+-  return products.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()));
++  return products.filter((p) => p.name.startsWith(query));
+ }
+```
+
 ```mermaid
 flowchart LR
   A["Flagsmith<br/>flag tagged <b>stale</b><br/>ON for everyone"] -->|"run_cleanup ON<br/>(signed webhook) or schedule"| B["GitHub Action<br/>flag-janitor run"]
